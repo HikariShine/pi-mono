@@ -4,18 +4,12 @@
  * 运行: npx tsx study/test-pi-ai.ts
  */
 
-import "@mariozechner/pi-ai"; // 自动注册内置 providers
-import { stream, complete, MODELS } from "@mariozechner/pi-ai";
-import type { Context, Model } from "@mariozechner/pi-ai";
+import { Model, Context, stream, getModel, complete } from "../packages/ai/src/index.js";
 
 // ============ 配置区 ============
 
 // 方式 1: 使用内置模型（修改 baseUrl）
-const model: Model<"openai-responses"> = {
-	...MODELS["gpt-4o-mini"],
-	baseUrl: "https://api.openai.com/v1", // 自定义 base URL
-	apiKey: process.env.OPENAI_API_KEY || "sk-xxx", // 或从环境变量读
-};
+const model: Model<"openai-responses"> = { ...getModel("openai", "gpt-5-codex"), baseUrl: "http://10.200.1.6:3000/v1" }
 
 // 方式 2: 完全自定义模型（适合自定义中转站）
 // const model: Model<"openai-responses"> = {
@@ -101,11 +95,7 @@ async function testSimple() {
 	console.log("\n=== 测试 streamSimple (简化版，带 reasoning) ===\n");
 
 	// 需要换成支持 reasoning 的模型
-	const reasoningModel: Model<"anthropic-messages"> = {
-		...MODELS["claude-sonnet-4-6"],
-		baseUrl: "https://api.anthropic.com/v1",
-		apiKey: process.env.ANTHROPIC_API_KEY || "sk-ant-xxx",
-	};
+	const reasoningModel: Model<"anthropic-messages"> = { ...getModel("anthropic", "claude-sonnet-4-6"), baseUrl: "http://10.200.1.6:3000/v1" };
 
 	const context: Context = {
 		messages: [
