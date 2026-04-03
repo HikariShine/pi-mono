@@ -49,6 +49,14 @@ async function main() {
             tools: [echoTool, timeTool],
         },
         getApiKey: () => "sk-mAeZNDVxVTUUYyFxeGprAAXafhXvOcdLzRV0kTCEZn2YFK2C",
+        beforeToolCall: async (ctx) => {
+            console.log("执行命令:", ctx.toolCall);
+            return undefined;
+        },
+        afterToolCall: async (ctx) => {
+            console.log("执行结果:", ctx.result);
+            return undefined;
+        },
     });
 
     // 订阅所有事件
@@ -94,6 +102,7 @@ async function main() {
     console.log("=".repeat(50));
     await agent.prompt("What's the time?");
 
+    await agent.continue();
     console.log("\n" + "=".repeat(50));
     console.log("User: Echo 'Hello World'");
     console.log("=".repeat(50));
