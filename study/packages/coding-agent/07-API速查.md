@@ -1,399 +1,337 @@
-# Coding Agent API 速查
+# coding-agent API 速查
 
-## 1. CLI 命令速查
+## 核心 API
 
-### 1.1 启动选项
+### 创建 AgentSession
 
-```bash
-# 基本启动
-pi
+```typescript
+import { createAgentSession, type CreateAgentSessionOptions } from "@mariozechner/pi-coding-agent";
 
-# 指定模型
-pi --model claude-sonnet-4
-pi --provider anthropic --model claude-sonnet-4
-pi --model anthropic/claude-sonnet-4:high  # provider/id:thinking
+const { session, cleanup } = await createAgentSession({
+  cwd: "/home/user/project",
+  // 可选配置
+  settingsPath: "~/.pi/agent/settings.json",
+  model: getModel("openai", "gpt-4o"),
+});
 
-# 指定会话
-pi --session <path|id>      # 打开指定会话
-pi -c                       # 继续最近会话
-pi -r                       # 选择会话恢复
-pi --fork <path|id>         # 分叉会话
-pi --no-session             # 临时会话（不保存）
-
-# 运行模式
-pi -p "prompt"              # 打印模式
-pi --mode json              # JSON 模式
-pi --mode rpc               # RPC 模式
-
-# 工具控制
-pi --tools read,write,edit,bash,grep,find,ls  # 指定工具
-pi --no-tools               # 禁用所有内置工具
-pi -e ./extension.ts        # 加载扩展
-pi --skill ./skill.md       # 加载技能
-```
-
-### 1.2 包管理命令
-
-```bash
-pi install npm:@foo/bar                    # npm 包
-pi install npm:@foo/bar@1.2.3             # 指定版本
-pi install git:github.com/user/repo       # git 仓库
-pi install ./local/path                   # 本地路径
-pi install -l <source>                    # 项目本地安装
-
-pi remove npm:@foo/bar
-pi update                                 # 更新所有包
-pi update npm:@foo/bar                    # 更新指定包
-pi list                                   # 列出已安装包
-pi config                                 # 配置包资源
+// 清理
+await cleanup();
 ```
 
 ---
 
-## 2. 交互式命令速查
+### 发送消息
 
-### 2.1 斜杠命令
+```typescript
+// 简单发送
+await session.prompt("Hello, what can you do?");
 
-| 命令 | 功能 |
-|------|------|
-| `/login` | OAuth 登录 |
-| `/logout` | 登出 |
-| `/model` | 切换模型 |
-| `/scoped-models` | 配置作用域模型 |
-| `/settings` | 打开设置 |
-| `/resume` | 恢复历史会话 |
-| `/new` | 新建会话 |
-| `/name <name>` | 设置会话名称 |
-| `/session` | 显示会话信息 |
-| `/tree` | 会话树导航 |
-| `/fork` | 分叉会话 |
-| `/compact [prompt]` | 手动压缩 |
-| `/copy` | 复制最后回复 |
-| `/export [file]` | 导出 HTML |
-| `/share` | 分享为 Gist |
-| `/reload` | 重新加载配置/扩展 |
-| `/hotkeys` | 显示快捷键 |
-| `/changelog` | 显示更新日志 |
-| `/quit`, `/exit` | 退出 |
-
-### 2.2 快捷键
-
-| 快捷键 | 功能 |
-|--------|------|
-| `Ctrl+C` | 清除编辑器 |
-| `Ctrl+C` (x2) | 退出 |
-| `Escape` | 取消/中止 |
-| `Escape` (x2) | 打开 `/tree` |
-| `Ctrl+L` | 选择模型 |
-| `Ctrl+P` / `Shift+Ctrl+P` | 循环作用域模型 |
-| `Shift+Tab` | 循环思考等级 |
-| `Ctrl+O` | 折叠/展开工具输出 |
-| `Ctrl+T` | 折叠/展开思考块 |
-| `Shift+Enter` | 多行输入 |
-| `Tab` | 路径补全 |
-| `@` | 文件引用 |
-| `!command` | 执行命令并发送结果 |
-| `!!command` | 执行命令（不发送结果） |
+// 带选项
+await session.prompt("Explain this code", {
+  expandPromptTemplates: true,  // 展开 @file:path 语法
+  images: [{ type: "image", data: base64, mimeType: "image/png" }],
+  streamingBehavior: "steer",  // 或 "followUp"
+});
+```
 
 ---
 
-## 3. SDK API 速查
-
-### 3.1 创建会话
+### 监听事件
 
 ```typescript
-import { createAgentSession } from "@mariozechner/pi-coding-agent"
-
-// 最简
-const { session } = await createAgentSession()
-
-// 完整配置
-const { session, extensionsResult } = await createAgentSession({
-  cwd: "/path/to/project",
-  model: myModel,
-  thinkingLevel: "high",
-  tools: [readTool, bashTool],
-  sessionManager: SessionManager.inMemory()
-})
-```
-
-### 3.2 发送消息
-
-```typescript
-// 简单文本
-await session.prompt("Hello")
-
-// 带图片
-await session.prompt("Describe this", {
-  images: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "..." } }]
-})
-
-// 不展开模板
-await session.prompt("Hello", { expandPromptTemplates: false })
-```
-
-### 3.3 事件监听
-
-```typescript
-const unsubscribe = session.subscribe((event) => {
-  switch (event.type) {
-    case "message_start":
-      console.log("Message started")
-      break
-    case "message_update":
-      console.log("Text:", event.message.content)
-      break
-    case "message_end":
-      console.log("Message completed")
-      break
-    case "tool_call":
-      console.log("Tool called:", event.toolCall.name)
-      break
-    case "tool_result":
-      console.log("Tool result:", event.result)
-      break
-    case "compaction_start":
-      console.log("Compacting...")
-      break
-    case "compaction_end":
-      console.log("Compacted:", event.result)
-      break
+const listener = (event: AgentSessionEvent) => {
+  if (event.type === "text_delta") {
+    process.stdout.write(event.delta);
   }
-})
+  if (event.type === "toolcall_end") {
+    console.log("Tool called:", event.toolCall.name);
+  }
+};
 
-// 取消监听
-unsubscribe()
-```
+session.addEventListener(listener);
 
-### 3.4 模型管理
-
-```typescript
-// 切换模型
-await session.setModel(newModel)
-
-// 设置思考等级
-session.setThinkingLevel("high")  // off | minimal | low | medium | high | xhigh
-
-// 获取当前模型
-console.log(session.model)
-
-// 获取作用域模型
-console.log(session.scopedModels)
-```
-
-### 3.5 会话管理
-
-```typescript
-// 手动压缩
-const result = await session.compact({
-  customInstructions: "Summarize focusing on API changes"
-})
-
-// 分叉会话
-await session.fork(entryId)
-
-// 导出 HTML
-await session.exportToHtml("./session.html")
-
-// 执行 bash
-const result = await session.executeBash("ls -la", { timeout: 30000 })
+// 移除监听
+session.removeEventListener(listener);
 ```
 
 ---
 
-## 4. Extension API 速查
-
-### 4.1 基本结构
+### 工具执行
 
 ```typescript
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
+// 执行 Bash 命令
+const result = await session.executeBash("ls -la", { timeout: 30000 });
+console.log(result.stdout);
 
-export default function (api: ExtensionAPI) {
-  // 注册工具
-  // 注册命令
-  // 订阅事件
-}
+// 执行单个工具
+const toolResult = await session.executeTool({
+  name: "read",
+  arguments: { path: "README.md" }
+});
 ```
 
-### 4.2 注册工具
+---
+
+## 工具系统
+
+### 创建工具
 
 ```typescript
-api.registerTool({
-  name: "my-tool",
-  description: "Description for LLM",
-  schema: Type.Object({
-    path: Type.String({ description: "File path" }),
-    content: Type.String({ description: "Content to write" })
+import { 
+  createReadTool, createBashTool, createEditTool, createWriteTool,
+  createGrepTool, createFindTool, createLsTool
+} from "@mariozechner/pi-coding-agent";
+
+const readTool = createReadTool("/home/user/project");
+const bashTool = createBashTool("/home/user/project", { timeout: 60000 });
+const editTool = createEditTool("/home/user/project");
+```
+
+### 工具定义
+
+```typescript
+import { Type, type ToolDefinition } from "@mariozechner/pi-coding-agent";
+
+const customTool: ToolDefinition = {
+  name: "my_tool",
+  description: "Does something useful",
+  parameters: Type.Object({
+    input: Type.String({ description: "Input to process" })
   }),
-  async execute(input, context) {
+  execute: async (input, context) => {
     // 执行逻辑
     return {
-      content: "Success",
-      details: { path: input.path }
-    }
+      content: "Result: " + input.input,
+      isError: false
+    };
   }
-})
-```
-
-### 4.3 注册命令
-
-```typescript
-api.registerCommand("my-command", {
-  description: "My custom command",
-  async execute(context, args) {
-    await context.ui.notify("Hello!")
-    await context.compact()
-  }
-})
-
-// 使用
-// /my-command
-```
-
-### 4.4 注册快捷键
-
-```typescript
-api.registerShortcut("ctrl+k", async (context) => {
-  const text = await context.ui.input("Enter text:")
-  context.ui.setEditorText(text)
-})
-```
-
-### 4.5 订阅事件
-
-```typescript
-api.on("agent_start", (event, context) => {
-  console.log("Agent started")
-})
-
-api.on("turn_end", async (event, context) => {
-  await context.ui.notify("Turn completed")
-})
-
-api.on("tool_call", async (event, context) => {
-  // 拦截工具调用
-  if (event.toolName === "bash") {
-    const allowed = await context.ui.confirm(
-      "Permission",
-      `Run: ${event.input.command}?`
-    )
-    if (!allowed) {
-      return { block: true, message: "Denied" }
-    }
-  }
-})
-```
-
-### 4.6 UI 交互
-
-```typescript
-// 选择器
-const choice = await api.ui.select("Choose:", ["A", "B", "C"])
-
-// 确认
-const ok = await api.ui.confirm("Title", "Are you sure?")
-
-// 输入
-const text = await api.ui.input("Enter value:", "placeholder")
-
-// 通知
-api.ui.notify("Message", "info")  // info | warning | error
-
-// 多行编辑
-const content = await api.ui.editor("Edit file", "initial content")
-
-// 状态
-api.ui.setStatus("my-ext", "Working...")
-api.ui.setStatus("my-ext", undefined)  // 清除
-
-// 小部件
-api.ui.setWidget("my-widget", ["Line 1", "Line 2"])
-
-// 设置编辑器内容
-api.ui.setEditorText("Hello")
-const current = api.ui.getEditorText()
-```
-
-### 4.7 自定义 UI 组件
-
-```typescript
-import { CustomEditor } from "@mariozechner/pi-coding-agent"
-
-// 自定义编辑器
-class VimEditor extends CustomEditor {
-  private mode: "normal" | "insert" = "insert"
-  
-  handleInput(data: string): void {
-    if (this.mode === "normal") {
-      if (data === "i") {
-        this.mode = "insert"
-        return
-      }
-    }
-    super.handleInput(data)
-  }
-}
-
-api.ui.setEditorComponent((tui, theme, keybindings) => 
-  new VimEditor(tui, theme, keybindings)
-)
-
-// 恢复默认
-api.ui.setEditorComponent(undefined)
+};
 ```
 
 ---
 
-## 5. 内置工具速查
+## 扩展系统
 
-### 5.1 read
+### 创建扩展
 
 ```typescript
-// 定义
-interface ReadToolInput {
-  file_path: string
-  offset?: number      // 起始行 (1-based)
-  limit?: number       // 最大行数
-}
+import type { Extension, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
-// 使用
-read({ file_path: "/path/to/file.ts", offset: 1, limit: 50 })
+const myExtension: Extension = {
+  name: "my-extension",
+  version: "1.0.0",
+  description: "My custom extension",
+  
+  setup(api: ExtensionAPI) {
+    // 注册命令
+    api.registerCommand("hello", async () => {
+      await api.sendUserMessage("Hello from extension!");
+    });
+    
+    // 注册工具
+    api.registerTool(customTool);
+  },
+  
+  async initialize(context: ExtensionContext) {
+    console.log("Extension initialized");
+  }
+};
+
+export default myExtension;
 ```
 
-### 5.2 write
+---
+
+## 会话管理
+
+### SessionManager 操作
 
 ```typescript
-// 定义
-interface WriteToolInput {
-  file_path: string
-  content: string
-}
+import { SessionManager, getSessionsDir } from "@mariozechner/pi-coding-agent";
 
-// 使用
-write({ file_path: "/path/to/file.ts", content: "..." })
+const manager = new SessionManager(getSessionsDir());
+
+// 加载会话
+const entries = await manager.loadSession("session-abc");
+
+// 添加 entry
+await manager.appendEntry("session-abc", {
+  type: "message",
+  id: "1",
+  parentId: null,
+  timestamp: new Date().toISOString(),
+  message: { /* ... */ }
+});
+
+// 列出所有会话
+const sessions = await manager.listSessions();
 ```
 
-### 5.3 edit
+---
+
+## 设置管理
+
+### SettingsManager
 
 ```typescript
-// 定义
-interface EditToolInput {
-  file_path: string
-  old_string: string   // 要替换的文本
-  new_string: string   // 新文本
-}
+import { SettingsManager, getSettingsPath } from "@mariozechner/pi-coding-agent";
 
-// 使用
-edit({ 
-  file_path: "/path/to/file.ts", 
-  old_string: "const x = 1",
-  new_string: "const x = 2"
-})
+const settings = new SettingsManager(getSettingsPath());
+
+// 加载
+await settings.load();
+
+// 获取值
+const model = settings.get("model");
+
+// 设置值
+settings.set("model", "gpt-4o");
+
+// 保存
+await settings.save();
 ```
 
-### 5.4 bash
+---
+
+## Skill 系统
+
+### 加载 Skills
 
 ```typescript
-// 定义
-interface BashToolInput {
-  command:
+import { loadSkillsFromDir, getAgentDir } from "@mariozechner/pi-coding-agent";
+import { join } from "path";
+
+const skillsDir = join(getAgentDir(), "skills");
+const { skills, diagnostics } = await loadSkillsFromDir(skillsDir);
+
+// 检查诊断
+for (const diag of diagnostics) {
+  console.warn(`${diag.severity}: ${diag.message}`);
+}
+
+// 使用 skill
+const skill = skills.find(s => s.name === "my-skill");
+```
+
+---
+
+## 认证管理
+
+### AuthStorage
+
+```typescript
+import { AuthStorage, FileAuthStorageBackend, getAuthPath } from "@mariozechner/pi-coding-agent";
+
+const backend = new FileAuthStorageBackend(getAuthPath());
+const auth = new AuthStorage(backend);
+
+// 加载
+await auth.load();
+
+// 设置 API Key
+auth.setApiKeyCredential("openai", { type: "apiKey", key: "sk-xxx" });
+
+// 设置 OAuth
+auth.setOAuthCredential("anthropic", {
+  type: "oauth",
+  accessToken: "xxx",
+  refreshToken: "yyy",
+  expires: Date.now() + 3600000
+});
+
+// 保存
+await auth.save();
+```
+
+---
+
+## 压缩管理
+
+### 手动压缩
+
+```typescript
+// 检查是否需要压缩
+import { shouldCompact, calculateContextTokens } from "@mariozechner/pi-coding-agent";
+
+const context = { messages: [...], tools: [...] };
+if (shouldCompact(context)) {
+  await session.compact("manual");
+}
+
+// 计算 token
+const tokens = calculateContextTokens(context.messages);
+```
+
+---
+
+## 事件类型速查
+
+| 事件 | 触发时机 | 关键字段 |
+|------|----------|----------|
+| `turn_start` | 用户发送消息 | `userMessage` |
+| `text_delta` | 接收文本增量 | `delta: string` |
+| `toolcall_start` | 开始执行工具 | `toolCall` |
+| `toolcall_end` | 工具执行完成 | `toolCall`, `result` |
+| `compaction_start` | 开始压缩 | `reason` |
+| `compaction_end` | 压缩完成 | `result`, `aborted` |
+| `session_switch` | 切换会话 | `sessionId` |
+| `model_change` | 切换模型 | `model` |
+
+---
+
+## 配置路径
+
+| 路径 | 获取函数 | 说明 |
+|------|----------|------|
+| `~/.pi/agent/` | `getAgentDir()` | 配置根目录 |
+| `~/.pi/agent/settings.json` | `getSettingsPath()` | 设置文件 |
+| `~/.pi/agent/auth.json` | `getAuthPath()` | 认证文件 |
+| `~/.pi/agent/models.json` | `getModelsPath()` | 模型配置 |
+| `~/.pi/agent/sessions/` | `getSessionsDir()` | 会话目录 |
+| `~/.pi/agent/skills/` | - | Skills 目录 |
+| `~/.pi/agent/tools/` | `getToolsDir()` | 工具目录 |
+
+---
+
+## CLI 使用
+
+```bash
+# 启动交互式模式
+pi
+
+# 打印模式
+pi --print "Explain this code" --file main.ts
+
+# 指定模型
+pi --models openai:gpt-4o,anthropic:claude-3-5-sonnet
+
+# 指定工作目录
+pi /path/to/project
+
+# 斜杠命令
+pi /session      # 会话管理
+pi /compact      # 手动压缩
+pi /model        # 切换模型
+pi /tools        # 工具管理
+```
+
+---
+
+## 环境变量
+
+| 变量 | 用途 |
+|------|------|
+| `PI_CODING_AGENT_DIR` | 覆盖配置目录 |
+| `PI_PACKAGE_DIR` | 覆盖包资源目录 |
+| `PI_DEBUG` | 启用调试日志 |
+| `PI_SHARE_VIEWER_URL` | 自定义分享查看器 URL |
+| `HTTP_PROXY` / `HTTPS_PROXY` | HTTP 代理 |
+
+---
+
+## 版本信息
+
+- **Package**: `@mariozechner/pi-coding-agent`
+- **Version**: 0.63.1
+- **License**: MIT
+- **Node**: >= 20.6.0
