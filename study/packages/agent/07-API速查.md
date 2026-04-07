@@ -1,314 +1,306 @@
-# pi-agent-core API 速查
+# agent API 速查
 
-## Agent 类
+## 核心 API
 
-### 构造
+### 创建 Agent
 
 ```typescript
+import { Agent, type AgentOptions } from "@mariozechner/pi-agent-core";
+
 const agent = new Agent({
+  // 初始状态
   initialState: {
-    systemPrompt: "You are helpful.",
-    model: getModel("anthropic", "claude-sonnet-4-20250514"),
+    systemPrompt: "You are a helpful assistant.",
+    model: getModel("openai", "gpt-4o"),
     thinkingLevel: "medium",
-    tools: [],
-    messages: [],
+    tools: []
   },
-  convertToLlm: (msgs) => msgs.filter(m => 
-    ["user", "assistant", "toolResult"].includes(m.role)
+  
+  // 消息转换
+  convertToLlm: (messages) => messages.filter(m => 
+    m.role === "user" || m.role === "assistant" || m.role === "toolResult"
   ),
-  transformContext: async (msgs) => msgs,
-  steeringMode: "one-at-a-time",
-  followUpMode: "one-at-a-time",
-  toolExecution: "parallel",
-  beforeToolCall: async ({ toolCall }) => undefined,
-  afterToolCall: async ({ result }) => undefined,
+  
+  // 上下文变换
+  transformContext: async (messages, signal) => {
+    // 裁剪旧消息
+    return messages.slice(-20);
+  },
+  
+  // 工具钩子
+  beforeToolCall: async (context, signal) => {
+    if (context.toolCall.name === "dangerous") {
+      return { block: true, reason: "Too dangerous" };
+    }
+  },
+  
+  afterToolCall: async (context, signal) => {
+    // 修改结果
+    return { isError: false };
+  },
+  
+  // 其他选项
+  toolExecution: "parallel",  // "sequential" | "parallel"
+  sessionId: "my-session",
+  transport: "sse"
 });
-```
-
-### 核心方法
-
-| 方法 | 签名 | 用途 |
-|------|------|------|
-| `prompt()` | `prompt(msg: string, images?: ImageContent[]): Promise<void>` | 发送消息，启动对话 |
-| `continue()` | `continue(): Promise<void>` | 从当前上下文继续 |
-| `subscribe()` | `subscribe(fn: (e: AgentEvent) => void): () => void` | 订阅事件 |
-| `abort()` | `abort(): void` | 取消当前操作 |
-| `waitForIdle()` | `waitForIdle(): Promise<void>` | 等待完成 |
-| `reset()` | `reset(): void` | 重置状态 |
-
-### 状态管理
-
-```typescript
-// Getter
-agent.state: AgentState
-
-// Setters
-agent.setSystemPrompt(prompt: string): void
-agent.setModel(model: Model<any>): void
-agent.setThinkingLevel(level: ThinkingLevel): void
-agent.setTools(tools: AgentTool[]): void
-agent.replaceMessages(messages: AgentMessage[]): void
-agent.appendMessage(message: AgentMessage): void
-
-// Session
-agent.sessionId: string | undefined
-agent.thinkingBudgets: ThinkingBudgets | undefined
-
-// Tool execution
-agent.toolExecution: ToolExecutionMode
-agent.setToolExecution(mode: ToolExecutionMode): void
-agent.setBeforeToolCall(fn): void
-agent.setAfterToolCall(fn): void
-```
-
-### 队列操作
-
-```typescript
-// Steering（转向）
-agent.steer(message: AgentMessage): void
-agent.setSteeringMode(mode: "all" | "one-at-a-time"): void
-agent.getSteeringMode(): "all" | "one-at-a-time"
-agent.clearSteeringQueue(): void
-
-// Follow-up（跟进）
-agent.followUp(message: AgentMessage): void
-agent.setFollowUpMode(mode: "all" | "one-at-a-time"): void
-agent.getFollowUpMode(): "all" | "one-at-a-time"
-agent.clearFollowUpQueue(): void
-
-agent.clearAllQueues(): void
-agent.hasQueuedMessages(): boolean
 ```
 
 ---
 
-## 低层 API (agent-loop.ts)
-
-### agentLoop
+### 发送消息
 
 ```typescript
-import { agentLoop, agentLoopContinue } from "@mariozechner/pi-agent-core";
+// 发送用户消息
+await agent.prompt({
+  role: "user",
+  content: "Hello!",
+  timestamp: Date.now()
+});
 
-// 启动新对话
+// 发送带图片的消息
+await agent.prompt({
+  role: "user",
+  content: [
+    { type: "text", text: "What's in this image?" },
+    { type: "image", data: base64, mimeType: "image/png" }
+  ],
+  timestamp: Date.now()
+});
+```
+
+---
+
+### 监听事件
+
+```typescript
+agent.addListener((event) => {
+  switch (event.type) {
+    case "agent_start":
+      console.log("Agent started");
+      break;
+      
+    case "turn_start":
+      console.log("New turn");
+      break;
+      
+    case "message_update":
+      // 流式更新
+      console.log(event.message.content[0]?.text);
+      break;
+      
+    case "message_end":
+      console.log("Message complete");
+      break;
+      
+    case "tool_execution_start":
+      console.log(`Tool ${event.toolName} started`);
+      break;
+      
+    case "tool_execution_end":
+      console.log(`Tool ${event.toolName} ended: ${event.isError ? "ERROR" : "OK"}`);
+      break;
+      
+    case "turn_end":
+      console.log("Turn ended");
+      break;
+      
+    case "agent_end":
+      console.log("Agent ended");
+      break;
+  }
+});
+
+// 移除监听
+agent.removeListener(listener);
+```
+
+---
+
+### 设置管理
+
+```typescript
+// 切换模型
+agent.setModel(getModel("anthropic", "claude-3-5-sonnet"));
+
+// 设置系统提示
+agent.setSystemPrompt("New system prompt");
+
+// 添加工具
+agent.addTool(myTool);
+
+// 设置 steering 消息
+agent.setSteeringMessages([{
+  role: "user",
+  content: "Correction: do it this way",
+  timestamp: Date.now()
+}]);
+
+// 设置 follow-up 消息
+agent.setFollowUpMessages([{
+  role: "user",
+  content: "Also check...",
+  timestamp: Date.now()
+}]);
+```
+
+---
+
+## Agent Loop 函数
+
+### 使用 agentLoop
+
+```typescript
+import { agentLoop, type AgentLoopConfig } from "@mariozechner/pi-agent-core";
+
 const stream = agentLoop(
-  prompts: AgentMessage[],      // 初始消息
-  context: AgentContext,        // 上下文
-  config: AgentLoopConfig,      // 配置
-  signal?: AbortSignal,         // 取消信号
-  streamFn?: StreamFn,          // 自定义流函数
+  prompts,  // AgentMessage[]
+  context,  // AgentContext
+  config,   // AgentLoopConfig
+  signal    // AbortSignal?
 );
 
-// 订阅事件
+// 监听事件
 for await (const event of stream) {
   console.log(event.type);
 }
 
-// 获取最终结果
+// 获取结果
 const messages = await stream.result();
 ```
 
-### agentLoopContinue
+### 使用 agentLoopContinue
 
 ```typescript
-// 从现有上下文继续
-const stream = agentLoopContinue(
-  context: AgentContext,
-  config: AgentLoopConfig,
-  signal?: AbortSignal,
-  streamFn?: StreamFn,
-);
+import { agentLoopContinue } from "@mariozechner/pi-agent-core";
 
-// 要求：context.messages.length > 0
-// 要求：最后一条不是 assistant
+// 继续现有循环（不添加新消息）
+const stream = agentLoopContinue(context, config, signal);
+
+// 同样监听事件...
 ```
 
 ---
 
-## 类型定义
-
-### AgentState
+## 工具定义
 
 ```typescript
-interface AgentState {
-  systemPrompt: string;
-  model: Model<any>;
-  thinkingLevel: ThinkingLevel;
-  tools: AgentTool<any>[];
-  messages: AgentMessage[];
-  isStreaming: boolean;
-  streamMessage: AssistantMessage | null;
-  pendingToolCalls: Set<string>;
-  error?: string;
-}
-```
+import { Type, type AgentTool } from "@mariozechner/pi-agent-core";
 
-### AgentContext
-
-```typescript
-interface AgentContext {
-  systemPrompt: string;
-  messages: AgentMessage[];  // 注意：引用！
-  tools: AgentTool<any>[];
-}
-```
-
-### AgentTool
-
-```typescript
-interface AgentTool<T> {
-  name: string;
-  label: string;
-  description: string;
-  parameters: TSchema;
-  execute: (
-    toolCallId: string,
-    params: Static<T>,
-    signal?: AbortSignal,
-    onUpdate?: (update: ToolUpdate) => void
-  ) => Promise<AgentToolResult<T>>;
-}
-```
-
-### AgentLoopConfig
-
-```typescript
-interface AgentLoopConfig extends SimpleStreamOptions {
-  model: Model<any>;
-  convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
-  transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
-  toolExecution?: ToolExecutionMode;
-  beforeToolCall?: BeforeToolCallFn;
-  afterToolCall?: AfterToolCallFn;
-  getSteeringMessages?: () => Promise<AgentMessage[]>;
-  getFollowUpMessages?: () => Promise<AgentMessage[]>;
-}
-```
-
----
-
-## 事件类型
-
-```typescript
-type AgentEvent =
-  | { type: "agent_start" }
-  | { type: "agent_end"; messages: AgentMessage[] }
-  | { type: "turn_start" }
-  | { type: "turn_end"; message: AssistantMessage; toolResults: ToolResultMessage[] }
-  | { type: "message_start"; message: AgentMessage }
-  | { type: "message_update"; message: AssistantMessage; assistantMessageEvent: AssistantMessageEvent }
-  | { type: "message_end"; message: AgentMessage }
-  | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_execution_update"; toolCallId: string; partialResult: ToolUpdate }
-  | { type: "tool_execution_end"; toolCallId: string; result: AgentToolResult<any> };
-```
-
----
-
-## 常用类型别名
-
-```typescript
-// 执行模式
-type ToolExecutionMode = "sequential" | "parallel";
-
-// 队列模式
-type QueueMode = "all" | "one-at-a-time";
-
-// 推理级别
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-// Stream 函数
-type StreamFn = (
-  model: Model<any>,
-  context: Context,
-  options: SimpleStreamOptions
-) => ReturnType<typeof streamSimple> | Promise<ReturnType<typeof streamSimple>>;
-```
-
----
-
-## 快速示例
-
-### 基本使用
-
-```typescript
-import { Agent } from "@mariozechner/pi-agent-core";
-import { getModel } from "@mariozechner/pi-ai";
-
-const agent = new Agent({
-  initialState: {
-    systemPrompt: "You are helpful.",
-    model: getModel("openai", "gpt-4o"),
-    tools: [],
-  },
-});
-
-agent.subscribe(console.log);
-await agent.prompt("Hello!");
-```
-
-### 带工具
-
-```typescript
-import { Type } from "@sinclair/typebox";
-
-const readTool: AgentTool = {
-  name: "read_file",
-  label: "Read File",
-  description: "Read a file",
+const myTool: AgentTool = {
+  name: "my_tool",
+  description: "Does something useful",
+  label: "My Tool",
   parameters: Type.Object({
-    path: Type.String(),
+    input: Type.String({ description: "Input to process" }),
+    count: Type.Optional(Type.Number({ default: 1 }))
   }),
-  execute: async (id, params) => ({
-    content: [{ type: "text", text: await fs.readFile(params.path, "utf-8") }],
-  }),
-};
-
-agent.setTools([readTool]);
-await agent.prompt("Read package.json");
-```
-
-### 流式输出
-
-```typescript
-agent.subscribe((event) => {
-  if (event.type === "message_update" && 
-      event.assistantMessageEvent.type === "text_delta") {
-    process.stdout.write(event.assistantMessageEvent.delta);
+  execute: async (toolCallId, params, signal, onUpdate) => {
+    // 流式更新（可选）
+    onUpdate?.({
+      content: [{ type: "text", text: "Processing..." }],
+      details: { progress: 50 }
+    });
+    
+    // 实际执行
+    const result = await doSomething(params);
+    
+    // 返回结果
+    return {
+      content: [{ type: "text", text: result.text }],
+      details: result.data
+    };
   }
-});
-```
-
-### 拦截工具
-
-```typescript
-const agent = new Agent({
-  beforeToolCall: async ({ toolCall }) => {
-    if (toolCall.name === "bash") {
-      return { block: true, reason: "Security: bash disabled" };
-    }
-  },
-});
-```
-
-### 继续对话
-
-```typescript
-try {
-  await agent.prompt("Do something risky");
-} catch (e) {
-  // 出错后重试
-  await agent.continue();
-}
+};
 ```
 
 ---
 
-## 错误码
+## Proxy 支持
 
-| 错误 | 触发条件 | 处理 |
-|------|----------|------|
-| `Agent is already processing` | `prompt()`/`continue()` 时 `isStreaming === true` | 等待或 `abort()` |
-| `Cannot continue from message role: assistant` | `continue()` 时最后一条是 assistant | 添加 steering 或等待 tool |
-| `No messages to continue from` | `continue()` 时 messages 为空 | 使用 `prompt()` |
-| `Tool not found` | LLM 调用了未注册的工具 | 检查 tools 配置 |
-| `Validation failed` | 工具参数不符合 schema | 检查参数类型 |
+```typescript
+import { streamProxy, type ProxyStreamOptions } from "@mariozechner/pi-agent-core";
+
+const agent = new Agent({
+  streamFn: (model, context, options) => 
+    streamProxy(model, context, {
+      ...options,
+      authToken: "your-token",
+      proxyUrl: "https://genai.example.com"
+    })
+});
+```
+
+---
+
+## 事件类型速查
+
+| 事件 | 触发时机 | 关键字段 |
+|------|----------|----------|
+| `agent_start` | Agent 开始 | - |
+| `agent_end` | Agent 结束 | `messages` |
+| `turn_start` | 回合开始 | - |
+| `turn_end` | 回合结束 | `message`, `toolResults` |
+| `message_start` | 消息开始 | `message` |
+| `message_update` | 消息更新 | `message`, `assistantMessageEvent` |
+| `message_end` | 消息结束 | `message` |
+| `tool_execution_start` | 工具开始 | `toolCallId`, `toolName`, `args` |
+| `tool_execution_update` | 工具更新 | `toolCallId`, `partialResult` |
+| `tool_execution_end` | 工具结束 | `toolCallId`, `result`, `isError` |
+
+---
+
+## 配置选项
+
+| 选项 | 类型 | 说明 |
+|------|------|------|
+| `initialState` | `Partial<AgentState>` | 初始状态 |
+| `convertToLlm` | `(AgentMessage[]) => Message[]` | 消息转换 |
+| `transformContext` | `(AgentMessage[], signal?) => Promise<AgentMessage[]>` | 上下文变换 |
+| `steeringMode` | `"all" \| "one-at-a-time"` | steering 模式 |
+| `followUpMode` | `"all" \| "one-at-a-time"` | follow-up 模式 |
+| `streamFn` | `StreamFn` | 自定义流函数 |
+| `sessionId` | `string` | 会话 ID |
+| `getApiKey` | `(provider) => string?` | 动态 API Key |
+| `thinkingBudgets` | `ThinkingBudgets` | 推理预算 |
+| `transport` | `Transport` | 传输方式 |
+| `maxRetryDelayMs` | `number` | 最大重试延迟 |
+| `toolExecution` | `"sequential" \| "parallel"` | 工具执行模式 |
+| `beforeToolCall` | `BeforeToolCallHook` | 工具前钩子 |
+| `afterToolCall` | `AfterToolCallHook` | 工具后钩子 |
+
+---
+
+## 常用类型导入
+
+```typescript
+// 核心
+import { Agent, type AgentOptions, type AgentState } from "@mariozechner/pi-agent-core";
+
+// Loop
+import { agentLoop, agentLoopContinue, type AgentLoopConfig } from "@mariozechner/pi-agent-core";
+
+// 类型
+import {
+  type AgentMessage,
+  type AgentEvent,
+  type AgentTool,
+  type AgentToolResult,
+  type BeforeToolCallContext,
+  type AfterToolCallContext,
+  type ThinkingLevel,
+  type ToolExecutionMode
+} from "@mariozechner/pi-agent-core";
+
+// Proxy
+import { streamProxy, type ProxyStreamOptions } from "@mariozechner/pi-agent-core";
+```
+
+---
+
+## 版本信息
+
+- **Package**: `@mariozechner/pi-agent-core`
+- **Version**: 0.63.1
+- **License**: MIT
+- **Node**: >= 20.0.0
