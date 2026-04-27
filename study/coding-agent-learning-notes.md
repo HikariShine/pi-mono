@@ -621,4 +621,238 @@ packages/coding-agent/src/core/
 
 ---
 
+## 6. InteractiveMode 交互模式详解
+
+> 研究时间: 2026-04-27
+> 研究范围: `packages/coding-agent/src/modes/interactive/interactive-mode.ts`
+
+### 6.1 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     InteractiveMode                              │
+│                    (交互模式主控制器)                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  TUI (根容器)                                                    │
+│  ├── headerContainer          ← Logo + 快捷键提示 + Changelog    │
+│  ├── chatContainer            ← 主聊天区（动态内容）              │
+│  │   ├── [Context/Skills/Prompts/Extensions] ← 启动时资源列表    │
+│  │   ├── UserMessageComponent       ← 用户消息                   │
+│  │   ├── BashExecutionComponent     ← !/!! 命令执行              │
+│  │   ├── AssistantMessageComponent  ← AI 回复（流式）            │
+│  │   └── ToolExecutionComponent     ← 工具调用卡片               │
+│  ├── pendingMessagesContainer ← 待发送消息队列                   │
+│  ├── statusContainer          ← 状态/加载区 (Loading动画)        │
+│  ├── widgetContainerAbove     ← 扩展组件（编辑器上方）           │
+│  ├── editorContainer          ← 编辑器区域                       │
+│  │   └── CustomEditor / ModelSelector / ExtensionSelector       │
+│  ├── widgetContainerBelow     ← 扩展组件（编辑器下方）           │
+│  └── footer                   ← 底部栏                           │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 构造方法初始化流程
+
+```typescript
+constructor(session: AgentSession, options: InteractiveModeOptions) {
+  // 1. 保存依赖
+  this.session = session;
+  
+  // 2. 创建 TUI 核心
+  this.ui = new TUI(new ProcessTerminal(), ...);
+  
+  // 3. 创建五大容器
+  this.headerContainer = new Container();
+  this.chatContainer = new Container();
+  this.pendingMessagesContainer = new Container();
+  this.statusContainer = new Container();
+  this.widgetContainerAbove/Below = new Container();
+  
+  // 4. 初始化键盘系统
+  this.keybindings = KeybindingsManager.create();
+  
+  // 5. 创建编辑器和 Footer
+  this.defaultEditor = new CustomEditor(this.ui, ...);
+  this.footer = new FooterComponent(session, ...);
+  
+  // 6. 加载主题
+  initTheme(this.settingsManager.getTheme(), true);
+}
+```
+
+### 6.3 事件驱动消息显示
+
+```typescript
+// 订阅 AgentSession 事件流
+private subscribeToAgent(): void {
+  this.unsubscribe = this.session.subscribe(async (event) => {
+    await this.handleEvent(event);  // 所有 UI 更新都从这里来
+  });
+}
+
+// 事件处理分发
+private async handleEvent(event: AgentSessionEvent): Promise<void> {
+  switch (event.type) {
+    case "message_start":
+      if (event.message.role === "user") {
+        this.addMessageToChat(event.message);  // 用户消息立即显示
+      } else if (event.message.role === "assistant") {
+        // AI 消息：创建流式组件
+        this.streamingComponent = new AssistantMessageComponent(...);
+        this.chatContainer.addChild(this.streamingComponent);
+      }
+      break;
+      
+    case "message_update":
+      // 流式更新内容
+      this.streamingComponent.updateContent(this.streamingMessage);
+      
+      // 检测工具调用
+      if (content.type === "toolCall") {
+        const component = new ToolExecutionComponent(...);
+        this.chatContainer.addChild(component);
+      }
+      break;
+      
+    case "message_end":
+      // 清理流式状态
+      this.streamingComponent = undefined;
+      break;
+  }
+  this.ui.requestRender();
+}
+```
+
+### 6.4 键盘快捷键系统
+
+#### Escape 键多层逻辑
+
+```typescript
+this.defaultEditor.onEscape = () => {
+  // 优先级 1：取消 Loading/队列
+  if (this.loadingAnimation) {
+    this.restoreQueuedMessagesToEditor({ abort: true });
+  }
+  // 优先级 2：终止 Bash 命令
+  else if (this.session.isBashRunning) {
+    this.session.abortBash();
+  }
+  // 优先级 3：退出 Bash 模式
+  else if (this.isBashMode) {
+    this.editor.setText("");
+    this.isBashMode = false;
+    this.updateEditorBorderColor();
+  }
+  // 优先级 4：双击 Escape 触发快捷操作
+  else if (!this.editor.getText().trim()) {
+    const now = Date.now();
+    if (now - this.lastEscapeTime < 500) {
+      if (action === "tree") this.showTreeSelector();
+      else this.showUserMessageSelector();
+    }
+    this.lastEscapeTime = now;
+  }
+};
+```
+
+#### 应用级 Action 快捷键
+
+| Action ID | 功能 |
+|-----------|------|
+| `app.clear` | Ctrl+C 清空编辑器/双击退出 |
+| `app.exit` | Ctrl+D 退出程序 |
+| `app.suspend` | Ctrl+Z 挂起 |
+| `app.thinking.cycle` | 循环 Thinking 级别 |
+| `app.model.cycleForward/Backward` | 切换模型 |
+| `app.tools.expand` | 展开/折叠工具输出 |
+| `app.message.followUp` | Alt+Enter 排队后续消息 |
+| `app.session.new/tree/fork/resume` | 会话操作 |
+
+### 6.5 Bash 命令执行
+
+```typescript
+// ! 开头：结果进入 AI 上下文
+!ls -la        → AI 能看到目录结构
+
+// !! 开头：结果不进入上下文（静默执行）
+!!npm install  → 上下文里没有 npm 输出
+```
+
+代码逻辑：
+```typescript
+if (text.startsWith("!")) {
+  const isExcluded = text.startsWith("!!");
+  const command = isExcluded ? text.slice(2) : text.slice(1);
+  await this.handleBashCommand(command, isExcluded);
+}
+```
+
+### 6.6 ToolExecutionComponent 工具执行组件
+
+负责把工具调用和结果渲染成卡片：
+
+```typescript
+class ToolExecutionComponent extends Container {
+  // 状态流转
+  constructor(toolName, args)     // 创建组件，显示调用
+  updateArgs(newArgs)             // 参数更新（流式解析）
+  markExecutionStarted()          // 开始执行
+  updateResult(result)            // 显示结果
+  setArgsComplete()               // 参数确定
+  
+  // 背景色状态
+  toolPendingBg  // 执行中 - 黄色
+  toolSuccessBg  // 成功 - 绿色  
+  toolErrorBg    // 错误 - 红色
+}
+```
+
+### 6.7 剪贴板图片粘贴
+
+```typescript
+this.defaultEditor.onPasteImage = () => {
+  const image = await readClipboardImage();
+  if (!image) return;
+  
+  // 写入临时文件
+  const filePath = path.join(tmpdir(), `pi-clipboard-${uuid}.png`);
+  fs.writeFileSync(filePath, Buffer.from(image.bytes));
+  
+  // 插入到编辑器
+  this.editor.insertTextAtCursor(filePath);
+};
+```
+
+跨平台实现：
+- Linux Wayland: `wl-paste`
+- Linux X11: `xclip`
+- WSL: `PowerShell` + `wl-paste` 回退
+- macOS/Windows: Native Clipboard API
+
+### 6.8 Editor Container 状态切换
+
+```
+editorContainer 的内容会根据状态变化：
+┌─────────────────────────────────────────────────┐
+│ 正常状态                                         │
+│ ┌─────────────────────────────────────────────┐ │
+│ │ CustomEditor (输入框)                        │ │
+│ └─────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────┤
+│ 选择器状态 (/model, /settings 等)               │
+│ ┌─────────────────────────────────────────────┐ │
+│ │ ModelSelectorComponent                       │ │
+│ └─────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────┤
+│ 加载状态 (/reload)                              │
+│ ┌─────────────────────────────────────────────┐ │
+│ │ BorderedLoader                               │ │
+│ └─────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
 *笔记完成*
