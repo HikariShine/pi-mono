@@ -1,0 +1,15 @@
+{
+  "extensions": [
+    "+extensions\\redraws.ts",
+    "+extensions\\tps.ts",
+    "+extensions\\prompt-url-widget.ts",
+    "+extensions\\files.ts",
+    "+extensions\\diff.ts"
+  ],
+  "prompts": [
+    "+prompts\\wr.md",
+    "+prompts\\pr.md",
+    "+prompts\\is.md",
+    "+prompts\\cl.md"
+  ]
+}
