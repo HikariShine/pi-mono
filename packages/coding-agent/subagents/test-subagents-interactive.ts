@@ -3,7 +3,8 @@ import testMessage from "./test-message.js";
 
 const settingsManager = SettingsManager.create()
 const extensionFactories = [testMessage];
-const resourceLoader = new DefaultResourceLoader({ settingsManager, extensionFactories });
+// const resourceLoader = new DefaultResourceLoader({ settingsManager, extensionFactories });
+const resourceLoader = new DefaultResourceLoader({ settingsManager });
 await resourceLoader.reload();
 
 const { session } = await createAgentSession({resourceLoader});
